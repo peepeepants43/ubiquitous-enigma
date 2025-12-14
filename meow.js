@@ -1,80 +1,31 @@
-import definePlugin from "@utils/types";
-import { findByProps } from "@metro/filters";
-import { registerCommand, unregisterCommand } from "@ui/commands";
+// ==Bunny/Vendetta Plugin== // @name Rushe Loop // @description Adds /rushe to loop sending "rush e" (send → delete → resend) in a fixed channel // @author ChatGPT // @version 1.0.0 // ==/Bunny/Vendetta Plugin==
 
-// --- CONFIGURATION ---
-const TARGET_CHANNEL_ID = "1382511994657046528";
-const RUSH_E_MESSAGE = "Rush E";
+import { findByProps } from "@vendetta/metro"; import { registerCommand, unregisterCommand } from "@vendetta/commands";
 
-// Internal Discord modules
-const MessageActions = findByProps("sendMessage", "editMessage");
-const DeletedMessageActions = findByProps("deleteMessage"); 
+const MessageActions = findByProps("sendMessage", "deleteMessage");
 
-export default definePlugin({
-    name: "RushESenderLoop",
-    description: "Registers /rushe to perform the 'send, delete, send again' flash sequence every time it's used.",
-    authors: [{ name: "Gemini", id: 0 }], 
+// Fixed target channel const TARGET_CHANNEL_ID = "1382511994657046528";
 
-    onLoad: () => {
-        
-        this.command = {
-            name: "rushe",
-            description: "Performs the 'Rush E' flash-and-send sequence.",
-            
-            execute: async (args, context) => {
-                
-                // No more checks, the command runs every time.
-                try {
-                    // --- PHASE 1: Send (Flash) ---
-                    const sentMessage = await MessageActions.sendMessage(
-                        TARGET_CHANNEL_ID,
-                        { 
-                            content: RUSH_E_MESSAGE,
-                        }
-                    );
-                    
-                    // Small delay to ensure the message is visible briefly and processed by the client
-                    await new Promise(resolve => setTimeout(resolve, 500)); 
+// Timing (safe defaults) const DELETE_DELAY_MS = 150;   // delay before deleting the first message const LOOP_INTERVAL_MS = 5000; // time between cycles
 
-                    // --- PHASE 2: Delete (Flash) ---
-                    await DeletedMessageActions.deleteMessage(
-                        TARGET_CHANNEL_ID,
-                        sentMessage.id, 
-                        false
-                    );
-                    
-                    // Another small delay before the final, permanent send
-                    await new Promise(resolve => setTimeout(resolve, 500)); 
+let loopHandle = null; let running = false;
 
-                    // --- PHASE 3: Send Again (Permanent) ---
-                    await MessageActions.sendMessage(
-                        TARGET_CHANNEL_ID,
-                        { 
-                            content: RUSH_E_MESSAGE,
-                        }
-                    );
-                    
-                    // 4. Success Response
-                    return {
-                        result: `Successfully completed the 'Rush E' sequence in channel ID ${TARGET_CHANNEL_ID}.`,
-                        success: true,
-                        ephemeral: true,
-                    };
-                    
-                } catch (error) {
-                    return {
-                        result: `Operation failed during the sequence: ${error.message}`,
-                        success: false,
-                        ephemeral: true,
-                    };
-                }
-            },
-        };
+async function cycleOnce() { const first = await MessageActions.sendMessage(TARGET_CHANNEL_ID, { content: "rush e" }); if (first?.id) { setTimeout(async () => { try { await MessageActions.deleteMessage(TARGET_CHANNEL_ID, first.id); await MessageActions.sendMessage(TARGET_CHANNEL_ID, { content: "rush e" }); } catch (_) {} }, DELETE_DELAY_MS); } }
 
-        registerCommand(this.command);
-    },
+export default { onLoad() { registerCommand({ name: "rushe", description: "Start looping rush e (send → delete → resend)", execute: async () => { if (running) return { content: "⚠️ Loop already running. Use /stoprushe.", ephemeral: true }; running = true; await cycleOnce(); loopHandle = setInterval(cycleOnce, LOOP_INTERVAL_MS); return { content: "▶️ Rushe loop started.", ephemeral: true }; } });
 
-    onUnload: () => {
-        unregisterCommand("rushe");
-    },
+registerCommand({
+  name: "stoprushe",
+  description: "Stop the rushe loop",
+  execute: () => {
+    if (!running) return { content: "ℹ️ Loop is not running.", ephemeral: true };
+    running = false;
+    if (loopHandle) clearInterval(loopHandle);
+    loopHandle = null;
+    return { content: "⏹️ Rushe loop stopped.", ephemeral: true };
+  }
 });
+
+},
+
+onUnload() { if (loopHandle) clearInterval(loopHandle); loopHandle = null; running = false; unregisterCommand("rushe"); unregisterCommand("stoprushe"); } };
